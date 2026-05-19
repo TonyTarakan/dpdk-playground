@@ -35,16 +35,16 @@ static void sig_handler(int) {
     g_stop = true;
 }
 
-// ── Generator parameters ──────────────────────────────────────────────────────
-struct GenParams {
-    double signal_freq_hz = 1'000.0;       // baseband tone frequency
-    double sample_rate_hz = 30'720.0;      // IQ sample rate (30.72 MSPS typical in 5G)
+// Generator parameters
+struct GenParams final {
+    double signal_freq_hz = 1'000.0;  // baseband tone frequency
+    double sample_rate_hz = 30'720.0; // IQ sample rate (30.72 MSPS typical in 5G)
     int16_t amplitude = 16'000;       // FS ≈ 32767
     uint32_t packet_rate_hz = 1'000;  // packets/sec  (controls TX pacing)
     uint16_t pc_id = 0;               // eCPRI Port/Channel ID
 };
 
-// ── Parse EAL-stripped arguments ──────────────────────────────────────────────
+// Parse EAL-stripped and signal generator arguments
 static GenParams parse_args(int argc, char** argv) {
     GenParams p{};
     static option long_opts[] = {
@@ -80,23 +80,30 @@ static GenParams parse_args(int argc, char** argv) {
     return p;
 }
 
-// ── Synthesise one packet worth of IQ samples ─────────────────────────────────
-//   phase is updated in place so the sine is phase-continuous across packets.
-// TODO: make the state obvious, no refs
-template<std::size_t Size>
-static void fill_iq_buf(std::array<ecpri::IQSample,Size>& buf, long long n, double& phase, double phase_inc, std::int16_t amp) {
-    for (long long i = 0; i < n; ++i) {
-        buf[i] = ecpri::IQSample::cpu_to_be(
-            static_cast<std::int16_t>(amp * std::cos(phase)),
-            static_cast<std::int16_t>(amp * std::sin(phase)));
-        phase += phase_inc;
-        if (phase > 2.0 * std::numbers::pi) {
-            phase -= 2.0 * std::numbers::pi;
+
+struct IQGenerator final {
+
+    // Synthesise one packet worth of IQ samples
+    template<std::size_t Size>
+    void fill_iq_buf(std::array<ecpri::IQSample,Size>& buf, long long n) {
+        for (long long i = 0; i < n; ++i) {
+            buf[i] = ecpri::IQSample::cpu_to_be(
+                static_cast<std::int16_t>(params_.amplitude * std::cos(phase_)),
+                static_cast<std::int16_t>(params_.amplitude * std::sin(phase_)));
+            phase_ += phase_inc_;
+            if (phase_ > 2.0 * std::numbers::pi) {
+                phase_ -= 2.0 * std::numbers::pi;
+            }
         }
     }
-}
 
-// ─────────────────────────────────────────────────────────────────────────────
+    const GenParams params_{};
+    double phase_inc_ = 2.0 * std::numbers::pi * params_.signal_freq_hz / params_.sample_rate_hz;
+    double phase_ = 0.0;
+};
+
+
+
 int main(int argc, char* argv[]) {
 
     auto* logger = quill::simple_logger();
@@ -104,7 +111,7 @@ int main(int argc, char* argv[]) {
     std::signal(SIGINT,  sig_handler);
     std::signal(SIGTERM, sig_handler);
 
-    // ── EAL init ──────────────────────────────────────────────────────────────
+    // EAL init
     const int eal_ret = rte_eal_init(argc, argv);
     if (eal_ret < 0) {
         throw std::runtime_error("rte_eal_init failed");
@@ -126,7 +133,7 @@ int main(int argc, char* argv[]) {
     // DPDK mbuf pool
     rte_mempool* mp = rte_pktmbuf_pool_create(
         "gen_mp", dpdk::MBUF_POOL_SIZE, dpdk::MBUF_CACHE_SIZE, 0,
-        RTE_MBUF_DEFAULT_BUF_SIZE, rte_socket_id());
+        RTE_MBUF_DEFAULT_BUF_SIZE, static_cast<int>(rte_socket_id()));
     if (!mp) {
         throw std::runtime_error("mbuf pool creation failed");
     }
@@ -146,9 +153,7 @@ int main(int argc, char* argv[]) {
     uint64_t next_tx = rte_rdtsc() + ticks_pkt;
 
     // Signal synthesis state
-    const double phase_inc = 2.0 * std::numbers::pi * signal_freq_hz / sample_rate_hz;
-    double phase = 0.0;
-    uint16_t seq = 0;
+    IQGenerator gen;
 
     quill::info(logger, "[gen] starting TX loop on port {}  (Ctrl-C to stop)\n", port_id);
 
@@ -184,8 +189,9 @@ int main(int argc, char* argv[]) {
         { // Fill eCPRI IQ frame
             auto* eth_payload = pkt_data + sizeof(dpdk::EthHeader);
             auto* ecpri_frame = reinterpret_cast<ecpri::IQFrame*>(eth_payload);
-            ecpri::IQFrame::make_hdr(*ecpri_frame, pc_id, seq);
-            fill_iq_buf(ecpri_frame->samples, ecpri::SMPS_PER_PKT, phase, phase_inc, amplitude);
+            ecpri::IQFrame::make_hdr(*ecpri_frame, pc_id, 0);
+
+            gen.fill_iq_buf(ecpri_frame->samples, ecpri::SMPS_PER_PKT);
         }
 
         // TX
@@ -197,7 +203,7 @@ int main(int argc, char* argv[]) {
         }
 
         if (tx_total % 4096 == 0) {
-            quill::info(logger, "[gen] tx={}  drop={}  seq={}\r", tx_total, tx_drop, seq);
+            quill::info(logger, "[gen] tx={}  drop={}\r", tx_total, tx_drop);
         }
     }
 

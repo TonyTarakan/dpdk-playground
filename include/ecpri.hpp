@@ -5,14 +5,9 @@
 #include <rte_byteorder.h>
 #include <arpa/inet.h>
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  eCPRI v2.0  –  minimal subset for IQ Data transport (Message Type 0)
-//  Reference: O-RAN.WG4.CUS.0-v09.00
-// ─────────────────────────────────────────────────────────────────────────────
-
 namespace ecpri {
 
-// ── eCPRI Common Header (4 bytes) ─────────────────────────────────────────────
+// eCPRI Common Header (4 bytes)
 struct __attribute__((packed)) CommonHeader {
     uint8_t  revision_c;   // bits[7:4]=revision(0x1), bits[3:1]=reserved, bit[0]=concat
     uint8_t  msg_type;     // 0x00 = IQ Data
@@ -26,7 +21,7 @@ struct __attribute__((packed)) CommonHeader {
 };
 static_assert(sizeof(CommonHeader) == 4);
 
-// ── eCPRI IQ Data Payload Header (4 bytes before the IQ samples) ──────────────
+// eCPRI IQ Data Payload Header (4 bytes before the IQ samples)
 struct __attribute__((packed)) IQDataHeader {
     uint16_t pc_id;        // PC_ID  – identifies the stream
     uint16_t seq_id;       // SEQ_ID – rolling sequence number (big-endian)
@@ -38,7 +33,7 @@ struct __attribute__((packed)) IQDataHeader {
 };
 static_assert(sizeof(IQDataHeader) == 4);
 
-// ── IQ sample: 16-bit signed I + 16-bit signed Q (big-endian on wire) ─────────
+// IQ sample
 struct __attribute__((packed)) IQSample {
     int16_t i_be;
     int16_t q_be;
@@ -52,7 +47,7 @@ struct __attribute__((packed)) IQSample {
 };
 static_assert(sizeof(IQSample) == 4);
 
-constexpr uint16_t SMPS_PER_PKT = 256; // must fit in one MTU
+constexpr uint16_t SMPS_PER_PKT = 256;
 constexpr uint16_t PAYLOAD_SIZE = sizeof(IQDataHeader) + SMPS_PER_PKT * sizeof(IQSample);
 
 struct __attribute__((packed)) IQFrame {
