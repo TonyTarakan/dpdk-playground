@@ -1,13 +1,8 @@
-// ─────────────────────────────────────────────────────────────────────────────
-//  eCPRI IQ Signal Generator
-//  Synthesises a complex sinusoid  I(t) = A·cos(2π·f·t),  Q(t) = A·sin(2π·f·t)
-//  packs it into eCPRI IQ-Data frames and sends them via DPDK TAP/veth port.
 //
-//  Build:  see CMakeLists.txt in this directory
-//  Run:    sudo ./dpdk-playground --vdev net_tap0,iface=tap0 --freq 1000 --fs 30720 --amplitude 16000 --rate-hz 1000
-// ─────────────────────────────────────────────────────────────────────────────
-#include "include/ecpri.hpp"
-#include "include/dpdk_port.hpp"
+// sudo ./ecpri_generator --vdev net_tap0,iface=tap0 -- --freq 1000 --fs 30720 --amplitude 16000 --rate-hz 1000
+//
+#include "ecpri.hpp"
+#include "dpdk_port.hpp"
 
 #include <rte_eal.h>
 #include <rte_ethdev.h>
@@ -28,7 +23,7 @@
 #include <print>
 #include <getopt.h>
 
-// ── Global stop flag ──────────────────────────────────────────────────────────
+// Global stop flag
 static std::atomic<bool> g_stop{false};
 
 static void sig_handler(int) {
