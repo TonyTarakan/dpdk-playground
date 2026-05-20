@@ -31,3 +31,21 @@ executable(
         '-Wextra'
     ]
 )
+
+executable(
+    'ecpri-receiver',
+    [
+        'src/receiver/main.cpp',
+    ],
+    include_directories : inc,
+    dependencies : [
+        dpdk,
+        fmt,
+        quill,
+    ],
+    cpp_args : [
+        '-march=native',
+        '-Wall',
+        '-Wextra'
+    ]
+)

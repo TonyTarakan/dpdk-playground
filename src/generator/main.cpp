@@ -1,6 +1,8 @@
 //
 // sudo ./ecpri_generator --vdev net_tap0,iface=tap0 -- --freq 1000 --fs 30720 --amplitude 16000 --rate-hz 1000
 //
+// test opts: --no-huge --no-pci --vdev=net_tap0,iface=dtap0 -- --freq 1000 --fs 30720 --amplitude 16000 --rate-hz 1000
+//
 #include "ecpri.hpp"
 #include "dpdk_port.hpp"
 
