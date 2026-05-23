@@ -33,7 +33,7 @@ static void sig_handler(int) {
 
 // Generator parameters
 struct GenParams final {
-    double signal_freq_hz = 1'000.0;  // baseband tone frequency
+    double signal_freq_hz = 10'000.0; // baseband tone frequency
     double sample_rate_hz = 30'720.0; // IQ sample rate (30.72 MSPS typical in 5G)
     int16_t amplitude = 16'000;       // FS ≈ 32767
     uint32_t packet_rate_hz = 1'000;  // packets/sec  (controls TX pacing)
@@ -87,7 +87,7 @@ struct IQGenerator final {
                 static_cast<int16_t>(params_.amplitude * std::cos(phase_)),
                 static_cast<int16_t>(params_.amplitude * std::sin(phase_))
             };
-            buf[i] = s.to_net();
+            buf[i] = sample_hton(s);
             phase_ += phase_inc_;
             if (phase_ > 2.0 * std::numbers::pi) {
                 phase_ -= 2.0 * std::numbers::pi;

@@ -10,11 +10,7 @@ target_include_directories(ecpri_receiver PRIVATE
     ${DPDK_INCLUDE_DIRS}
 )
 
-# FFTW3
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(FFTW3F REQUIRED fftw3f)
-
-# SFML
+find_package(kissfft REQUIRED)
 find_package(SFML 2.5 COMPONENTS graphics window system REQUIRED)
 
 target_link_libraries(ecpri_receiver PRIVATE
@@ -23,13 +19,9 @@ target_link_libraries(ecpri_receiver PRIVATE
     -lrte_net_af_packet
     -lrte_net_tap
     -Wl,--no-whole-archive
-    ${FFTW3F_LIBRARIES}
+    kissfft::kissfft
     sfml-graphics
     sfml-window
     sfml-system
     pthread dl numa m
-)
-
-target_include_directories(ecpri_receiver PRIVATE
-    ${FFTW3F_INCLUDE_DIRS}
 )

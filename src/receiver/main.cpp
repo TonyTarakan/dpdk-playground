@@ -1,5 +1,7 @@
 #include "ecpri.hpp"
 #include "dpdk_port.hpp"
+#include "dsp.hpp"
+#include "gui.hpp"
 
 #include <rte_eal.h>
 #include <rte_ethdev.h>
@@ -10,8 +12,6 @@
 
 #include <quill/SimpleSetup.h>
 #include <quill/LogFunctions.h>
-
-#include <SFML/Graphics.hpp>
 
 #include <cstdio>
 #include <cmath>
@@ -47,10 +47,7 @@ static int rx_lcore_task(void* arg) {
     quill::info(g_logger, "RX lcore {} started\n", rte_lcore_id());
 
     while (!g_stop.load(std::memory_order_relaxed)) {
-        auto buf_cnt = rte_eth_rx_burst(PORT_ID, 0, burst, dpdk::BURST_SIZE);
-        // if (buf_cnt > 0) {
-        //     quill::info(g_logger, "Burst of {} buffers\r", buf_cnt);
-        // }
+        const auto buf_cnt = rte_eth_rx_burst(PORT_ID, 0, burst, dpdk::BURST_SIZE);
 
         uint16_t valid_cnt = 0;
         for (uint16_t i = 0; i < buf_cnt; ++i) {
@@ -89,8 +86,8 @@ static int rx_lcore_task(void* arg) {
             valid_cnt,
             nullptr);
 
-        // Не влезли в ring — дропаем
-        for (uint16_t i = enqueued_cnt; i < enqueued_cnt; ++i) {
+        // Didn't fit - just drop
+        for (uint16_t i = enqueued_cnt; i < valid_cnt; ++i) {
             rte_pktmbuf_free(burst[i]);
             ++drop_cnt;
         }
@@ -98,7 +95,7 @@ static int rx_lcore_task(void* arg) {
         total_cnt += enqueued_cnt;
     }
 
-    quill::info(g_logger, "RX lcore {} stopped. Received {}  Dropped %lu\n",
+    quill::info(g_logger, "RX lcore {} stopped. Received {}  Dropped {}\n",
         rte_lcore_id(), total_cnt, drop_cnt);
 
     return 0;
@@ -108,37 +105,8 @@ static int rx_lcore_task(void* arg) {
 // DSP(FFT) loop
 //
 static int dsp_lcore_task(void* arg) {
-    auto* ring = static_cast<rte_ring*>(arg);
-
     quill::info(g_logger, "DSP lcore {} started\n", rte_lcore_id());
-
-    rte_mbuf* mbufs[dpdk::BURST_SIZE];
-
-    while (!g_stop.load(std::memory_order_relaxed)) {
-        const uint16_t deq_cnt = rte_ring_dequeue_burst(
-                ring,
-                reinterpret_cast<void**>(mbufs),
-                dpdk::BURST_SIZE,
-                nullptr);
-
-        if (deq_cnt == 0) {
-            // No data available - sleep a little
-            rte_pause();
-            continue;
-        }
-
-        for (uint16_t i = 0; i < deq_cnt; ++i) {
-            rte_mbuf* mbuf = mbufs[i];
-
-            // TODO: process data
-
-            rte_pktmbuf_free(mbuf);
-        }
-    }
-
-    quill::info(g_logger, "DSP lcore {} stopped\n", rte_lcore_id());
-
-    return 0;
+    return dsp::DspCore::lcore_entry(arg);
 }
 
 //
@@ -154,17 +122,15 @@ int main(int argc, char* argv[]) {
     if (eal_ret < 0) {
         throw std::runtime_error("rte_eal_init failed");
     }
-    // argc -= eal_ret;
-    // argv += eal_ret;
-    // TODO: add user args
+    if (rte_lcore_count() < 3) throw std::runtime_error("Нужно 3 lcore: --lcores 0-2");
 
+
+    // TODO: add user args
 
     rte_mempool* mp = rte_pktmbuf_pool_create(
         "rx_mp", dpdk::MBUF_POOL_SIZE, dpdk::MBUF_CACHE_SIZE, 0,
         RTE_MBUF_DEFAULT_BUF_SIZE, static_cast<int>(rte_socket_id()));
-    if (!mp) {
-        throw std::runtime_error("mbuf pool creation failed");
-    }
+    if (!mp) throw std::runtime_error("mbuf pool creation failed");
 
     // Use first available port (should be the TAP vdev)
     constexpr uint16_t PORT_ID = 0;
@@ -174,74 +140,33 @@ int main(int argc, char* argv[]) {
                 link.link_status ? "UP" : "DOWN",
                 link.link_speed);
 
-    quill::info(g_logger, "starting RX loop on port {}  (Ctrl-C to stop)\n", PORT_ID);
+    quill::info(g_logger, "Starting RX on port {}  (Ctrl-C to stop)\n", PORT_ID);
 
-    // SPSC ring: RX lcore -> DSP lcore
-    constexpr uint32_t RING_SIZE = 4096;
-    constexpr auto RING_NAME = "IQ_RX_RING";
-    rte_ring* rx_ring = rte_ring_create(RING_NAME, RING_SIZE, rte_socket_id(), RING_F_SP_ENQ | RING_F_SC_DEQ);
-    if (!rx_ring) {
-        throw std::runtime_error(std::string("rte_ring_create failed: ") + RING_NAME);
-    }
+    // SPSC ring with IQ data
+    // RX lcore -> DSP lcore
+    constexpr unsigned IQ_RING_SIZE = 4096;
+    rte_ring* iq_ring = rte_ring_create("IQ_RING", IQ_RING_SIZE,
+                                        rte_socket_id(), RING_F_SP_ENQ | RING_F_SC_DEQ);
+    if (!iq_ring) throw std::runtime_error("IQ_RING creation failed");
 
-    if (rte_lcore_count() < 3)
-        throw std::runtime_error("Нужно 3 lcore: --lcores 0-2");
+    // SPSC ring with SpectrumFrame pointers
+    // DSP lcore -> MAIN lcore
+    constexpr unsigned FRM_RING_SIZE = 16;
+    rte_ring* frame_ring = rte_ring_create("FRAME_RING", FRM_RING_SIZE,
+                                            rte_socket_id(), RING_F_SP_ENQ | RING_F_SC_DEQ);
+    if (!frame_ring) throw std::runtime_error("FRAME_RING creation failed");
+
+    dsp::DspCore dsp_core{iq_ring, frame_ring};
 
     const auto dsp_lcore = rte_get_next_lcore(rte_get_main_lcore(), 1, 0);
-    rte_eal_remote_launch(dsp_lcore_task, rx_ring, dsp_lcore);
+    rte_eal_remote_launch(dsp_lcore_task, &dsp_core, dsp_lcore);
 
     const auto rx_lcore = rte_get_next_lcore(dsp_lcore, 1, 0);
-    rte_eal_remote_launch(rx_lcore_task, rx_ring, rx_lcore);
+    rte_eal_remote_launch(rx_lcore_task, iq_ring, rx_lcore);
 
-    // TODO: render picture
-
-    constexpr int WIN_W          =  1280;
-    constexpr int WIN_H          =  800;
-    constexpr int MARGIN         =  20;
-    constexpr int CHART_H        =  WIN_H - 2 * MARGIN;
-    constexpr float DB_MIN_VAL   = -100.0f;
-    constexpr float DB_MAX_VAL   =  0.0f;
-    sf::RenderWindow window(sf::VideoMode(WIN_W, WIN_H), "IQ FFT");
-    window.setFramerateLimit(60);
-    while (window.isOpen()) {
-        sf::Event event{};
-        while (window.pollEvent(event)) {
-            if (event.type == sf::Event::Closed) {
-                window.close();
-            }
-        }
-
-        window.clear();
-
-        // Draw grid
-        const auto db_to_y = [](auto db) {
-            const float norm = 1.0f - (db - DB_MIN_VAL) / (DB_MAX_VAL - DB_MIN_VAL);
-            return MARGIN + norm * CHART_H;
-        };
-        std::invoke([&](){
-            constexpr auto plot_w = WIN_W - 2 * MARGIN;
-            // Horizontal lines
-            float db = DB_MIN_VAL;
-            while (db <= DB_MAX_VAL) {
-                float y = db_to_y(db);
-                sf::RectangleShape line{{plot_w, 1.f}};
-                line.setPosition(MARGIN, y);
-                line.setFillColor(sf::Color(50, 50, 50));
-                window.draw(line);
-                db += 10.0f;
-            }
-            // Vertical lines
-            constexpr int n_freq = 8;
-            for (int i = 0; i <= n_freq; ++i) {
-                auto x = MARGIN + i / n_freq * plot_w;
-                sf::RectangleShape line({1.f, CHART_H});
-                line.setPosition(static_cast<float>(x), MARGIN);
-                line.setFillColor(sf::Color(50, 50, 50));
-                window.draw(line);
-            }
-        });
-
-        window.display();
+    gui::SpectrumView view;
+    while (view.is_open() && !g_stop.load(std::memory_order_relaxed)) {
+        view.update(dsp_core, frame_ring);
     }
 
     g_stop.store(true);
@@ -249,7 +174,8 @@ int main(int argc, char* argv[]) {
     rte_eal_wait_lcore(dsp_lcore);
     rte_eal_wait_lcore(rx_lcore);
     rte_eth_dev_stop(PORT_ID);
-    rte_ring_free(rx_ring);
+    rte_ring_free(iq_ring);
+    rte_ring_free(frame_ring);
     rte_eal_cleanup();
 
     quill::info(g_logger, "BYE!\n");

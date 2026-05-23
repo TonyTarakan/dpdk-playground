@@ -20,13 +20,13 @@ struct __attribute__((packed)) CommonHeader {
         h.payload_size = rte_cpu_to_be_16(payload_bytes);
     }
 
-    uint16_t revision_c_host() const {
+    [[nodiscard]] uint16_t revision_c_ntoh() const {
         return rte_be_to_cpu_16(revision_c);
     }
-    uint16_t msg_type_host() const {
+    [[nodiscard]] uint16_t msg_type_ntoh() const {
         return rte_be_to_cpu_16(msg_type);
     }
-    uint16_t payload_size_host() const {
+    [[nodiscard]] uint16_t payload_size_ntoh() const {
         return rte_be_to_cpu_16(payload_size);
     }
 };
@@ -42,10 +42,10 @@ struct __attribute__((packed)) IQDataHeader {
         h.seq_id = rte_cpu_to_be_16(seq);
     }
 
-    int16_t pc_id_host() const {
+    [[nodiscard]] int16_t pc_id_ntoh() const {
         return rte_be_to_cpu_16(pc_id);
     }
-    int16_t seq_id_host() const {
+    [[nodiscard]] int16_t seq_id_ntoh() const {
         return rte_be_to_cpu_16(seq_id);
     }
 };
@@ -53,34 +53,17 @@ static_assert(sizeof(IQDataHeader) == 4);
 
 // IQ sample
 struct __attribute__((packed)) IQSample {
-
-    IQSample(int16_t i_be, int16_t q_be) : i_be(i_be), q_be(q_be) {};
-
-    IQSample to_net() const {
-        return {
-            static_cast<int16_t>(rte_cpu_to_be_16(i_be)),
-            static_cast<int16_t>(rte_cpu_to_be_16(q_be))
-        };
-    }
-
-    int16_t i_host() const {
-        return rte_be_to_cpu_16(i_be);
-    }
-    int16_t q_host() const {
-        return rte_be_to_cpu_16(q_be);
-    }
-    int16_t i_net() const {
-        return rte_be_to_cpu_16(i_be);
-    }
-    int16_t q_net() const {
-        return rte_be_to_cpu_16(q_be);
-    }
-
-private:
     int16_t i_be;
     int16_t q_be;
 };
 static_assert(sizeof(IQSample) == 4);
+
+inline IQSample sample_hton(const IQSample& s) {
+    return {
+        static_cast<int16_t>(rte_cpu_to_be_16(s.i_be)),
+        static_cast<int16_t>(rte_cpu_to_be_16(s.q_be))
+    };
+}
 
 constexpr uint16_t SAMPS_PER_PKT = 256;
 constexpr uint16_t PAYLOAD_SIZE = sizeof(IQDataHeader) + SAMPS_PER_PKT * sizeof(IQSample);
