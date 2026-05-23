@@ -82,13 +82,13 @@ private:
 };
 static_assert(sizeof(IQSample) == 4);
 
-constexpr uint16_t SMPS_PER_PKT = 256;
-constexpr uint16_t PAYLOAD_SIZE = sizeof(IQDataHeader) + SMPS_PER_PKT * sizeof(IQSample);
+constexpr uint16_t SAMPS_PER_PKT = 256;
+constexpr uint16_t PAYLOAD_SIZE = sizeof(IQDataHeader) + SAMPS_PER_PKT * sizeof(IQSample);
 
 struct __attribute__((packed)) IQFrame {
     CommonHeader common;
     IQDataHeader iq_hdr;
-    IQSample samples[SMPS_PER_PKT];
+    IQSample samples[SAMPS_PER_PKT];
 
     static void make_hdr(IQFrame& f, uint16_t pc_id, uint16_t seq) {
         CommonHeader::make(f.common, PAYLOAD_SIZE);

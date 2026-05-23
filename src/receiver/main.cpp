@@ -11,6 +11,8 @@
 #include <quill/SimpleSetup.h>
 #include <quill/LogFunctions.h>
 
+#include <SFML/Graphics.hpp>
+
 #include <cstdio>
 #include <cmath>
 #include <csignal>
@@ -192,6 +194,24 @@ int main(int argc, char* argv[]) {
     rte_eal_remote_launch(rx_lcore_task, rx_ring, rx_lcore);
 
     // TODO: render picture
+
+    sf::RenderWindow window(sf::VideoMode(1280, 720), "IQ FFT");
+    window.setFramerateLimit(60);
+    while (window.isOpen()) {
+        sf::Event event{};
+        while (window.pollEvent(event)) {
+            if (event.type == sf::Event::Closed) {
+                window.close();
+            }
+        }
+
+        window.clear();
+        sf::RectangleShape bar(sf::Vector2f(100, 200));
+        bar.setPosition(500, 500);
+        bar.setFillColor(sf::Color::White);
+        window.draw(bar);
+        window.display();
+    }
 
     rte_eal_wait_lcore(dsp_lcore);
     rte_eal_wait_lcore(rx_lcore);
