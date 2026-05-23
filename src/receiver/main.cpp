@@ -195,7 +195,13 @@ int main(int argc, char* argv[]) {
 
     // TODO: render picture
 
-    sf::RenderWindow window(sf::VideoMode(1280, 720), "IQ FFT");
+    constexpr int WIN_W          =  1280;
+    constexpr int WIN_H          =  800;
+    constexpr int MARGIN         =  20;
+    constexpr int CHART_H        =  WIN_H - 2 * MARGIN;
+    constexpr float DB_MIN_VAL   = -100.0f;
+    constexpr float DB_MAX_VAL   =  0.0f;
+    sf::RenderWindow window(sf::VideoMode(WIN_W, WIN_H), "IQ FFT");
     window.setFramerateLimit(60);
     while (window.isOpen()) {
         sf::Event event{};
@@ -206,16 +212,42 @@ int main(int argc, char* argv[]) {
         }
 
         window.clear();
-        sf::RectangleShape bar(sf::Vector2f(100, 200));
-        bar.setPosition(500, 500);
-        bar.setFillColor(sf::Color::White);
-        window.draw(bar);
+
+        // Draw grid
+        const auto db_to_y = [](auto db) {
+            const float norm = 1.0f - (db - DB_MIN_VAL) / (DB_MAX_VAL - DB_MIN_VAL);
+            return MARGIN + norm * CHART_H;
+        };
+        std::invoke([&](){
+            constexpr auto plot_w = WIN_W - 2 * MARGIN;
+            // Horizontal lines
+            float db = DB_MIN_VAL;
+            while (db <= DB_MAX_VAL) {
+                float y = db_to_y(db);
+                sf::RectangleShape line{{plot_w, 1.f}};
+                line.setPosition(MARGIN, y);
+                line.setFillColor(sf::Color(50, 50, 50));
+                window.draw(line);
+                db += 10.0f;
+            }
+            // Vertical lines
+            constexpr int n_freq = 8;
+            for (int i = 0; i <= n_freq; ++i) {
+                auto x = MARGIN + i / n_freq * plot_w;
+                sf::RectangleShape line({1.f, CHART_H});
+                line.setPosition(static_cast<float>(x), MARGIN);
+                line.setFillColor(sf::Color(50, 50, 50));
+                window.draw(line);
+            }
+        });
+
         window.display();
     }
 
+    g_stop.store(true);
+
     rte_eal_wait_lcore(dsp_lcore);
     rte_eal_wait_lcore(rx_lcore);
-
     rte_eth_dev_stop(PORT_ID);
     rte_ring_free(rx_ring);
     rte_eal_cleanup();
