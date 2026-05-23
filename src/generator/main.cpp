@@ -22,7 +22,6 @@
 #include <atomic>
 #include <string>
 #include <stdexcept>
-#include <print>
 #include <getopt.h>
 
 // Global stop flag
@@ -41,7 +40,7 @@ struct GenParams final {
     uint16_t pc_id = 0;               // eCPRI Port/Channel ID
 };
 
-// Parse EAL-stripped and signal generator arguments
+// Parse EAL and Signal Generator arguments
 static GenParams parse_args(int argc, char** argv) {
     GenParams p{};
     static option long_opts[] = {
@@ -82,11 +81,13 @@ struct IQGenerator final {
 
     // Synthesise one packet worth of IQ samples
     template<std::size_t Size>
-    void fill_iq_buf(std::array<ecpri::IQSample,Size>& buf, long long n) {
-        for (long long i = 0; i < n; ++i) {
-            buf[i] = ecpri::IQSample::cpu_to_be(
-                static_cast<std::int16_t>(params_.amplitude * std::cos(phase_)),
-                static_cast<std::int16_t>(params_.amplitude * std::sin(phase_)));
+    void fill_iq_buf(ecpri::IQSample (&buf)[Size]) {
+        for (long long i = 0; i < Size; ++i) {
+            const ecpri::IQSample s{
+                static_cast<int16_t>(params_.amplitude * std::cos(phase_)),
+                static_cast<int16_t>(params_.amplitude * std::sin(phase_))
+            };
+            buf[i] = s.to_net();
             phase_ += phase_inc_;
             if (phase_ > 2.0 * std::numbers::pi) {
                 phase_ -= 2.0 * std::numbers::pi;
@@ -99,8 +100,9 @@ struct IQGenerator final {
     double phase_ = 0.0;
 };
 
-
-
+//
+// main
+//
 int main(int argc, char* argv[]) {
 
     auto* logger = quill::simple_logger();
@@ -150,7 +152,7 @@ int main(int argc, char* argv[]) {
     uint64_t next_tx = rte_rdtsc() + ticks_pkt;
 
     // Signal synthesis state
-    IQGenerator gen;
+    IQGenerator signal_gen;
 
     quill::info(logger, "[gen] starting TX loop on port {}  (Ctrl-C to stop)\n", port_id);
 
@@ -188,7 +190,7 @@ int main(int argc, char* argv[]) {
             auto* ecpri_frame = reinterpret_cast<ecpri::IQFrame*>(eth_payload);
             ecpri::IQFrame::make_hdr(*ecpri_frame, pc_id, 0);
 
-            gen.fill_iq_buf(ecpri_frame->samples, ecpri::SMPS_PER_PKT);
+            signal_gen.fill_iq_buf(ecpri_frame->samples);
         }
 
         // TX

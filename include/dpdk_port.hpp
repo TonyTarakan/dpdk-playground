@@ -1,12 +1,11 @@
 #pragma once
+
 #include <rte_eal.h>
 #include <rte_ethdev.h>
-#include <rte_mbuf.h>
 #include <rte_mempool.h>
 #include <stdexcept>
 #include <string>
 #include <cstdio>
-#include <print>
 
 
 namespace dpdk {

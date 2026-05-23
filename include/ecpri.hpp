@@ -1,4 +1,5 @@
 #pragma once
+
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -18,6 +19,16 @@ struct __attribute__((packed)) CommonHeader {
         h.msg_type    = 0x00;
         h.payload_size = rte_cpu_to_be_16(payload_bytes);
     }
+
+    uint16_t revision_c_host() const {
+        return rte_be_to_cpu_16(revision_c);
+    }
+    uint16_t msg_type_host() const {
+        return rte_be_to_cpu_16(msg_type);
+    }
+    uint16_t payload_size_host() const {
+        return rte_be_to_cpu_16(payload_size);
+    }
 };
 static_assert(sizeof(CommonHeader) == 4);
 
@@ -30,20 +41,44 @@ struct __attribute__((packed)) IQDataHeader {
         h.pc_id  = rte_cpu_to_be_16(pc);
         h.seq_id = rte_cpu_to_be_16(seq);
     }
+
+    int16_t pc_id_host() const {
+        return rte_be_to_cpu_16(pc_id);
+    }
+    int16_t seq_id_host() const {
+        return rte_be_to_cpu_16(seq_id);
+    }
 };
 static_assert(sizeof(IQDataHeader) == 4);
 
 // IQ sample
 struct __attribute__((packed)) IQSample {
-    int16_t i_be;
-    int16_t q_be;
 
-    static IQSample cpu_to_be(int16_t i, int16_t q) {
+    IQSample(int16_t i_be, int16_t q_be) : i_be(i_be), q_be(q_be) {};
+
+    IQSample to_net() const {
         return {
-            static_cast<int16_t>(rte_cpu_to_be_16(i)),
-            static_cast<int16_t>(rte_cpu_to_be_16(q))
+            static_cast<int16_t>(rte_cpu_to_be_16(i_be)),
+            static_cast<int16_t>(rte_cpu_to_be_16(q_be))
         };
     }
+
+    int16_t i_host() const {
+        return rte_be_to_cpu_16(i_be);
+    }
+    int16_t q_host() const {
+        return rte_be_to_cpu_16(q_be);
+    }
+    int16_t i_net() const {
+        return rte_be_to_cpu_16(i_be);
+    }
+    int16_t q_net() const {
+        return rte_be_to_cpu_16(q_be);
+    }
+
+private:
+    int16_t i_be;
+    int16_t q_be;
 };
 static_assert(sizeof(IQSample) == 4);
 
@@ -53,7 +88,7 @@ constexpr uint16_t PAYLOAD_SIZE = sizeof(IQDataHeader) + SMPS_PER_PKT * sizeof(I
 struct __attribute__((packed)) IQFrame {
     CommonHeader common;
     IQDataHeader iq_hdr;
-    std::array<IQSample,SMPS_PER_PKT> samples;
+    IQSample samples[SMPS_PER_PKT];
 
     static void make_hdr(IQFrame& f, uint16_t pc_id, uint16_t seq) {
         CommonHeader::make(f.common, PAYLOAD_SIZE);
